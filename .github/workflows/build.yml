@@ -1,0 +1,91 @@
+name: Compilador crDroid Android 16 merlinx
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Maximizar espacio del servidor de GitHub
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 5120
+        swap-size-mb: 32768
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+
+    - name: Configurar herramientas de Android
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gperf gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc ccache python-is-python3
+
+    - name: Instalar herramienta Repo de Google
+      run: |
+        mkdir -p ~/bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+        chmod a+x ~/bin/repo
+        echo "$HOME/bin" >> $GITHUB_PATH
+
+    - name: Sincronizar Base de crDroid 16.0
+      run: |
+        mkdir ~/crDroid
+        cd ~/crDroid
+        git config --global user.name "LOLGD190"
+        git config --global user.email "natlma0alt@gmail.com"
+        repo init -u https://github.com/crdroidandroid/android.git -b 16.0 --git-lfs --no-clone-bundle
+
+    - name: Inyectar Manifiesto de Redirección Inteligente
+      run: |
+        cd ~/crDroid
+        mkdir -p .repo/local_manifests
+        cat << 'EOF' > .repo/local_manifests/merlinx.xml
+        <?xml version="1.0" encoding="UTF-8"?>
+        <manifest>
+          <remote name="github" fetch="https://github.com" />
+          
+          <project path="device/xiaomi/merlinx" name="LOLGD190/android_device_xiaomi_merlinx" remote="github" revision="16.2" />
+          <project path="device/xiaomi/mt6768-common" name="LOLGD190/android_device_xiaomi_mt6768-common" remote="github" revision="lineage-23.2" />
+          
+          <project path="kernel/xiaomi/mt6768" name="mt6768-dev/android_kernel_xiaomi_mt6768" remote="github" revision="lineage-23.2" />
+          <project path="vendor/xiaomi/mt6768-common" name="mt6768-dev/proprietary_vendor_xiaomi_mt6768-common" remote="github" revision="lineage-23.2" />
+          <project path="vendor/xiaomi/merlinx" name="mt6768-dev/proprietary_vendor_xiaomi_merlinx" remote="github" revision="lineage-23.2" />
+          <project path="hardware/mediatek" name="LineageOS/android_hardware_mediatek" remote="github" revision="lineage-23.2" />
+          <project path="device/mediatek/sepolicy_vndr" name="LineageOS/android_device_mediatek_sepolicy_vndr" remote="github" revision="lineage-23.2" />
+          <project path="hardware/xiaomi" name="LineageOS/android_hardware_xiaomi" remote="github" revision="lineage-23.2" />
+          <project path="lineage-sdk" name="LineageOS/android_lineage-sdk" remote="github" revision="lineage-23.2" />
+        </manifest>
+        EOF
+
+    - name: Descargar todo el árbol en la nube
+      run: |
+        cd ~/crDroid
+        repo sync -c -j4 --force-sync --no-clone-bundle --no-tags
+
+    - name: Inyectar Parches en el Servidor (Bypass de los bugs de Soong)
+      run: |
+        cd ~/crDroid
+        
+        # Fix vendor namespace issues
+        sed -i 's/system_ext_specific: true/system_ext_specific: false/g' vendor/xiaomi/mt6768-common/Android.bp 2>/dev/null || true
+        
+        # Fix bootanimation gen
+        sed -i '/name: "gen-bootanimation.zip"/,/out:/! { /cmd:/c\    cmd: "bash $(location gen-bootanimation.sh) $(out) $(genDir) $(location bootanimation_1440.tar) $(location bootanimation_1080.tar) $(location bootanimation_720.tar) $(location bootanimation.tar) $(location desc.txt) 1080 2340 30 $(location soong_zip)",' vendor/addons/prebuilt/bootanimation/Android.bp 2>/dev/null || true
+        
+        # Add missing libc++fs for vibrator
+        mkdir -p hardware/xiaomi/vibrator/effect
+        echo 'cc_library { name: "libc++fs", srcs: [] }' > hardware/xiaomi/vibrator/effect/Android.bp
+
+    - name: Compilar crDroid Android 16
+      run: |
+        cd ~/crDroid
+        . build/envsetup.sh
+        lunch crdroid_merlinx-trunk_staging-userdebug || lunch crdroid_merlinx-userdebug || lunch lineage_merlinx-userdebug
+        make bacon -j$(nproc --all)
+
+    - name: Registrar archivo .ZIP final para descarga directa
+      uses: actions/upload-artifact@v4
+      with:
+        name: crDroid-Android16-merlinx
+        path: ~/crDroid/out/target/product/merlinx/*.zip
