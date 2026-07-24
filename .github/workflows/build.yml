@@ -43,7 +43,6 @@ jobs:
         cat << 'EOF' > .repo/local_manifests/merlinx.xml
         <?xml version="1.0" encoding="UTF-8"?>
         <manifest>
-          <remote name="github" fetch="https://github.com" />
           
           <project path="device/xiaomi/merlinx" name="LOLGD190/android_device_xiaomi_merlinx" remote="github" revision="16.2" />
           <project path="device/xiaomi/mt6768-common" name="LOLGD190/android_device_xiaomi_mt6768-common" remote="github" revision="lineage-23.2" />
